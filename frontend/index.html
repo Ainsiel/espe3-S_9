@@ -125,7 +125,25 @@
 
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const API_BASE = window.EVENTPASS_API_URL || '';
+        const normalizeApiBase = (value) => (value || '').replace(/\/+$/, '');
+        const API_BASE = normalizeApiBase(window.EVENTPASS_API_URL);
+
+        async function apiFetch(path, options = {}) {
+            const res = await fetch(`${API_BASE}${path}`, options);
+            const contentType = res.headers.get('content-type') || '';
+            const data = contentType.includes('application/json')
+                ? await res.json()
+                : { detail: await res.text() };
+
+            if (!res.ok) {
+                const detail = Array.isArray(data.detail)
+                    ? data.detail.map(item => item.msg || item.message || JSON.stringify(item)).join(', ')
+                    : data.detail;
+                throw new Error(detail || `Error HTTP ${res.status}`);
+            }
+
+            return data;
+        }
 
         function App() {
             const [view, setView] = useState('catalog');
@@ -231,16 +249,13 @@
             }, [category, availability, search]);
 
             const fetchEvents = async () => {
-                let url = `${API_BASE}/api/events?categoria=${category}&disponibilidad=${availability}`;
+                let url = `/api/events?categoria=${category}&disponibilidad=${availability}`;
                 if (search.trim()) {
                     url += `&search=${encodeURIComponent(search)}`;
                 }
                 try {
-                    const res = await fetch(url);
-                    if (res.ok) {
-                        const data = await res.json();
-                        setEvents(data);
-                    }
+                    const data = await apiFetch(url);
+                    setEvents(data);
                 } catch (err) {
                     console.error('Error fetching events:', err);
                 }
@@ -325,11 +340,8 @@
 
             const fetchEvent = async () => {
                 try {
-                    const res = await fetch(`${API_BASE}/api/events/${eventId}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        setEvent(data);
-                    }
+                    const data = await apiFetch(`/api/events/${eventId}`);
+                    setEvent(data);
                 } catch (err) {
                     console.error('Error fetching event details:', err);
                 }
@@ -341,7 +353,7 @@
                     return;
                 }
                 try {
-                    const res = await fetch(`${API_BASE}/api/reservations`, {
+                    const data = await apiFetch('/api/reservations', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -349,15 +361,10 @@
                         },
                         body: JSON.stringify({ event_id: eventId })
                     });
-                    const data = await res.json();
-                    if (res.ok) {
-                        showAlert(`Reserva confirmada. Código: ${data.codigo_confirmacion}`, 'success');
-                        setView('reservations');
-                    } else {
-                        showAlert(data.detail || 'No se pudo completar la reserva', 'danger');
-                    }
+                    showAlert(`Reserva confirmada. Código: ${data.codigo_confirmacion}`, 'success');
+                    setView('reservations');
                 } catch (err) {
-                    showAlert('Error en la conexión con el servidor', 'danger');
+                    showAlert(err.message || 'Error en la conexión con el servidor', 'danger');
                 }
             };
 
@@ -440,24 +447,19 @@
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 try {
-                    const res = await fetch(`${API_BASE}/api/auth/login`, {
+                    const data = await apiFetch('/api/auth/login', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ email, password })
                     });
-                    const data = await res.json();
-                    if (res.ok) {
-                        localStorage.setItem('token', data.access_token);
-                        localStorage.setItem('user_email', email);
-                        setToken(data.access_token);
-                        setUserEmail(email);
-                        showAlert('Inicio de sesión exitoso', 'success');
-                        setView('catalog');
-                    } else {
-                        showAlert(data.detail || 'Credenciales inválidas', 'danger');
-                    }
+                    localStorage.setItem('token', data.access_token);
+                    localStorage.setItem('user_email', email);
+                    setToken(data.access_token);
+                    setUserEmail(email);
+                    showAlert('Inicio de sesión exitoso', 'success');
+                    setView('catalog');
                 } catch (err) {
-                    showAlert('Error al conectar con el servidor', 'danger');
+                    showAlert(err.message || 'Error al conectar con el servidor', 'danger');
                 }
             };
 
@@ -502,20 +504,15 @@
                     return;
                 }
                 try {
-                    const res = await fetch(`${API_BASE}/api/auth/register`, {
+                    await apiFetch('/api/auth/register', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ email, password })
                     });
-                    const data = await res.json();
-                    if (res.ok) {
-                        showAlert('Cuenta registrada. Inicia sesión', 'success');
-                        setView('login');
-                    } else {
-                        showAlert(data.detail || 'Error en el registro', 'danger');
-                    }
+                    showAlert('Cuenta registrada. Inicia sesión', 'success');
+                    setView('login');
                 } catch (err) {
-                    showAlert('Error en la conexión con el servidor', 'danger');
+                    showAlert(err.message || 'Error en la conexión con el servidor', 'danger');
                 }
             };
 
@@ -558,13 +555,10 @@
 
             const fetchReservations = async () => {
                 try {
-                    const res = await fetch(`${API_BASE}/api/reservations/me`, {
+                    const data = await apiFetch('/api/reservations/me', {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
-                    if (res.ok) {
-                        const data = await res.json();
-                        setReservations(data);
-                    }
+                    setReservations(data);
                 } catch (err) {
                     console.error('Error fetching reservations:', err);
                 }
@@ -572,21 +566,15 @@
 
             const handleCancel = async () => {
                 try {
-                    const res = await fetch(`${API_BASE}/api/reservations/${cancelId}/cancel`, {
+                    await apiFetch(`/api/reservations/${cancelId}/cancel`, {
                         method: 'PUT',
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
-                    const data = await res.json();
-                    if (res.ok) {
-                        showAlert('Reserva cancelada exitosamente', 'success');
-                        setCancelId(null);
-                        fetchReservations();
-                    } else {
-                        showAlert(data.detail || 'No se pudo cancelar la reserva', 'danger');
-                        setCancelId(null);
-                    }
+                    showAlert('Reserva cancelada exitosamente', 'success');
+                    setCancelId(null);
+                    fetchReservations();
                 } catch (err) {
-                    showAlert('Error de conexión', 'danger');
+                    showAlert(err.message || 'Error de conexión', 'danger');
                     setCancelId(null);
                 }
             };
